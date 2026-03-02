@@ -268,7 +268,147 @@ def lcog_bar_chart(inc_lcog: float, plat_lcog: float, unit_label: str):
     ax.set_title("Levelized cost comparison")
     st.pyplot(fig, use_container_width=True)
 
+# -----------------------------
+# Process flow diagram (matplotlib, no extra deps)
+# -----------------------------
+def _draw_flow(ax, blocks, title, branch=None, note=None):
+    """
+    blocks: list[str] laid left->right
+    branch: list[dict] optional extra arrows like:
+        {"from": int, "to": int, "text": str, "style": "dashed"}
+    """
+    ax.set_axis_off()
+    ax.set_title(title, pad=12)
 
+    n = len(blocks)
+    xs = np.linspace(0.08, 0.92, n)
+    y = 0.55
+
+    # draw boxes
+    for i, (x, label) in enumerate(zip(xs, blocks)):
+        ax.text(
+            x, y, label,
+            ha="center", va="center",
+            fontsize=10,
+            bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="black", lw=1.2),
+            transform=ax.transAxes,
+        )
+        if i < n - 1:
+            ax.annotate(
+                "",
+                xy=(xs[i + 1] - 0.055, y),
+                xytext=(x + 0.055, y),
+                arrowprops=dict(arrowstyle="->", lw=1.6),
+                xycoords=ax.transAxes,
+                textcoords=ax.transAxes,
+            )
+
+    # branches (backup / vent / offgas)
+    if branch:
+        for b in branch:
+            i0, i1 = b["from"], b["to"]
+            text = b.get("text", "")
+            style = b.get("style", "solid")
+            y0 = b.get("y0", 0.25)
+            y1 = b.get("y1", 0.55)
+
+            arrowprops = dict(arrowstyle="->", lw=1.4)
+            if style == "dashed":
+                arrowprops["linestyle"] = "--"
+
+            ax.annotate(
+                "",
+                xy=(xs[i1], y1),
+                xytext=(xs[i0], y0),
+                arrowprops=arrowprops,
+                xycoords=ax.transAxes,
+                textcoords=ax.transAxes,
+            )
+            if text:
+                ax.text(
+                    (xs[i0] + xs[i1]) / 2,
+                    (y0 + y1) / 2 + 0.05,
+                    text,
+                    ha="center",
+                    va="center",
+                    fontsize=9,
+                    transform=ax.transAxes,
+                )
+
+    if note:
+        ax.text(0.02, 0.05, note, fontsize=9, transform=ax.transAxes)
+
+
+def flow_spec(gas: str, option: str, category: str):
+    g = gas.lower()
+    o = option.lower()
+
+    # N2
+    if "nitrogen" in g:
+        if "delivered" in o:
+            blocks = ["LIN truck", "Bulk LIN tank", "Vaporizer", "Pressure regulation", "N₂ header", "Point-of-use"]
+            branch = [{"from": 1, "to": 4, "text": "Peak buffer", "style": "dashed", "y0": 0.25, "y1": 0.55}]
+            note = "Delivered model: cost + uptime tied to logistics and contracts."
+            return blocks, branch, note
+
+        if "membrane" in o:
+            blocks = ["Ambient air", "Compressor", "Filters + dryer", "Membrane module", "N₂ receiver", "N₂ header"]
+            branch = [{"from": 3, "to": 3, "text": "Permeate/O₂-rich offgas → vent", "style": "dashed", "y0": 0.25, "y1": 0.55}]
+            note = "Membrane: lower CAPEX, purity/recovery tradeoff."
+            return blocks, branch, note
+
+        # PSA / PSA+purifier
+        blocks = ["Ambient air", "Compressor", "Filters + dryer", "PSA beds", "N₂ receiver", "N₂ header"]
+        branch = [{"from": 3, "to": 3, "text": "Offgas → vent", "style": "dashed", "y0": 0.25, "y1": 0.55}]
+        if "purifier" in o or "5n" in o:
+            blocks = ["Ambient air", "Compressor", "Filters + dryer", "PSA beds", "Purifier", "N₂ receiver", "N₂ header"]
+            branch = [{"from": 3, "to": 3, "text": "Offgas → vent", "style": "dashed", "y0": 0.25, "y1": 0.55}]
+            note = "PSA+purifier: higher purity, higher CAPEX + power."
+            return blocks, branch, note
+        note = "PSA: strongest economics at steady industrial demand."
+        return blocks, branch, note
+
+    # O2
+    if "oxygen" in g:
+        if "delivered" in o:
+            blocks = ["LOX truck", "Bulk LOX tank", "Vaporizer", "Pressure regulation", "O₂ receiver", "O₂ header"]
+            branch = [{"from": 1, "to": 4, "text": "Peak buffer", "style": "dashed", "y0": 0.25, "y1": 0.55}]
+            note = "Delivered model: logistics-heavy; simple ops."
+            return blocks, branch, note
+
+        if "vpsa" in o or "vsa" in o:
+            blocks = ["Ambient air", "Blower/LP comp", "Filters", "VPSA beds + vacuum", "O₂ receiver", "O₂ header"]
+            branch = [
+                {"from": 3, "to": 3, "text": "N₂-rich tailgas → vent", "style": "dashed", "y0": 0.25, "y1": 0.55},
+                # optional backup path shown conceptually
+                {"from": 0, "to": 4, "text": "Optional LOX backup → receiver", "style": "dashed", "y0": 0.25, "y1": 0.55},
+            ]
+            note = "VPSA: best for 90–95% O₂; consider LOX backup only for peaks/resilience."
+            return blocks, branch, note
+
+        if "cryo" in o or "asu" in o:
+            blocks = ["Ambient air", "Compressor", "Pre-purification", "Cold box", "O₂ product tank", "O₂ header"]
+            branch = [{"from": 3, "to": 3, "text": "N₂/Ar coproducts (optional)", "style": "dashed", "y0": 0.25, "y1": 0.55}]
+            note = "Micro-cryo ASU: high purity; high CAPEX + complexity."
+            return blocks, branch, note
+
+    # CO2
+    if "carbon dioxide" in g or "co2" in g:
+        if "delivered" in o:
+            blocks = ["Liquid CO₂ truck", "Bulk LCO₂ tank", "Pump/pressure build", "Vaporizer", "Quality check", "CO₂ header"]
+            branch = [{"from": 1, "to": 5, "text": "Buffer inventory", "style": "dashed", "y0": 0.25, "y1": 0.55}]
+            note = "Delivered CO₂: simple when supply is stable; vulnerable to shortage events."
+            return blocks, branch, note
+
+        # conditioning + storage
+        blocks = ["Supply contract / source", "Bulk LCO₂ storage", "Conditioning (pump/vaporizer)", "QA + telemetry", "CO₂ header", "SLA monitoring"]
+        branch = [{"from": 1, "to": 4, "text": "Extended buffer", "style": "dashed", "y0": 0.25, "y1": 0.55}]
+        note = "Platform CO₂ (no capture): selling uptime + buffering + monitoring (not CO₂ generation)."
+        return blocks, branch, note
+
+    # default fallback
+    blocks = ["Input", "Process", "Output"]
+    return blocks, None, "Flow not defined for this selection yet."
 # -----------------------------
 # "Why better" narrative builder
 # -----------------------------
@@ -528,6 +668,40 @@ p2.metric("Avg power (Platform)", f"{plat_kw:,.1f} kW")
 p3.metric("Platform power", f"{plat_kw/1000:,.3f} MW")
 
 st.caption("Power draw is what investors and customers usually miss. The platform wins when electricity is stable and delivered gas is expensive or unreliable.")
+
+st.subheader("Process flow diagram")
+
+view_mode = st.radio(
+    "Show flow for",
+    options=["Both", "Incumbent only", "Platform only"],
+    horizontal=True
+)
+
+if view_mode in ("Both", "Incumbent only"):
+    inc_blocks, inc_branch, inc_note = flow_spec(gas, incumbent_choice, "Incumbent")
+if view_mode in ("Both", "Platform only"):
+    plat_blocks, plat_branch, plat_note = flow_spec(gas, platform_choice, "Platform")
+
+if view_mode == "Both":
+    f1, f2 = st.columns(2)
+    with f1:
+        fig, ax = plt.subplots(figsize=(8, 2.4))
+        _draw_flow(ax, inc_blocks, "Incumbent process flow", branch=inc_branch, note=inc_note)
+        st.pyplot(fig, use_container_width=True)
+    with f2:
+        fig, ax = plt.subplots(figsize=(8, 2.4))
+        _draw_flow(ax, plat_blocks, "Platform process flow", branch=plat_branch, note=plat_note)
+        st.pyplot(fig, use_container_width=True)
+
+elif view_mode == "Incumbent only":
+    fig, ax = plt.subplots(figsize=(10, 2.6))
+    _draw_flow(ax, inc_blocks, "Incumbent process flow", branch=inc_branch, note=inc_note)
+    st.pyplot(fig, use_container_width=True)
+
+else:
+    fig, ax = plt.subplots(figsize=(10, 2.6))
+    _draw_flow(ax, plat_blocks, "Platform process flow", branch=plat_branch, note=plat_note)
+    st.pyplot(fig, use_container_width=True)
 
 # -----------------------------
 # Company view: BOM / pricing story

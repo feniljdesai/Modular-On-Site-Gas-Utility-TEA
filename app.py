@@ -1,8 +1,11 @@
 import math
+from typing import Dict, Tuple
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+
 
 # -----------------------------
 # Finance + TEA utilities
@@ -14,31 +17,33 @@ def crf(wacc: float, n_years: int) -> float:
         return 1 / n_years
     return (wacc * (1 + wacc) ** n_years) / (((1 + wacc) ** n_years) - 1)
 
-def annual_units_from_load(load_row: dict, capacity_factor: float) -> float:
-    unit = load_row["unit"]
+
+def annual_units(avg_flow, annual_units_value, unit: str, capacity_factor: float) -> float:
     if unit == "Nm3/h":
-        return float(load_row["avg_flow"]) * 8760.0 * capacity_factor
+        return float(avg_flow or 0.0) * 8760.0 * capacity_factor
     if unit == "t/yr":
-        return float(load_row["annual_units"])
+        return float(annual_units_value or 0.0)
     raise ValueError(f"Unsupported unit: {unit}")
 
-def avg_power_kw(load_row: dict, kwh_per_unit: float) -> float:
-    unit = load_row["unit"]
+
+def avg_power_kw(avg_flow, annual_units_value, unit: str, kwh_per_unit: float) -> float:
     if unit == "Nm3/h":
-        return float(load_row["avg_flow"]) * float(kwh_per_unit)
+        return float(avg_flow or 0.0) * float(kwh_per_unit)
     if unit == "t/yr":
-        return (float(load_row["annual_units"]) * float(kwh_per_unit)) / 8760.0
+        return (float(annual_units_value or 0.0) * float(kwh_per_unit)) / 8760.0
     return 0.0
 
+
 def scale_capex(base_capex: float, demand: float, base_demand: float, exponent: float) -> float:
-    if base_demand <= 0:
-        return base_capex
     if demand <= 0:
         return 0.0
+    if base_demand <= 0:
+        return base_capex
     return base_capex * (demand / base_demand) ** exponent
 
+
 def lcog(
-    annual_units: float,
+    annual_units_value: float,
     capex_installed: float,
     wacc: float,
     project_life: int,
@@ -48,248 +53,426 @@ def lcog(
     electricity_price: float,
     kwh_per_unit: float,
     variable_opex_per_unit: float,
-    include_shared_labor: bool,
-    shared_labor_pool: float,
-    shared_labor_split: float,
-):
-    if annual_units <= 0:
+) -> Tuple[float, Dict[str, float]]:
+    if annual_units_value <= 0:
         return float("nan"), {}
 
     capex_total = capex_installed * (1.0 + contingency_pct)
     annualized_capex = capex_total * crf(wacc, project_life)
     fixed_om = capex_total * fixed_om_pct
-    electricity = annual_units * kwh_per_unit * electricity_price
-    variable_opex = annual_units * variable_opex_per_unit
-    shared_labor = (shared_labor_pool * shared_labor_split) if include_shared_labor else 0.0
+    electricity = annual_units_value * kwh_per_unit * electricity_price
+    variable_opex = annual_units_value * variable_opex_per_unit
+    total_annual = annualized_capex + fixed_om + labor_per_year + electricity + variable_opex
 
-    total_annual = annualized_capex + fixed_om + labor_per_year + electricity + variable_opex + shared_labor
     breakdown = {
         "Annualized CAPEX": annualized_capex,
         "Fixed O&M": fixed_om,
         "Labor": labor_per_year,
         "Electricity": electricity,
         "Variable OPEX": variable_opex,
-        "Shared labor": shared_labor,
         "Total annual": total_annual,
     }
-    return total_annual / annual_units, breakdown
+    return total_annual / annual_units_value, breakdown
+
 
 # -----------------------------
-# Defaults (from your table)
+# BOM interpolation helpers
 # -----------------------------
-def default_assumptions():
-    return {
-        "electricity_price": 0.10,
-        "wacc": 0.12,
-        "project_life": 10,
-        "capacity_factor": 0.90,
-        "contingency_pct": 0.15,
-        "shared_labor_pool": 60000.0,
-        "capex_scaling_exponent": 0.70,
-        # Keep OFF to match your pasted LCOG examples which didn’t allocate shared labor per gas
-        "include_shared_labor_in_lcog": False,
+def lerp(x: float, x0: float, x1: float, y0: float, y1: float) -> float:
+    if x1 == x0:
+        return y0
+    t = (x - x0) / (x1 - x0)
+    t = max(0.0, min(1.0, t))
+    return y0 + t * (y1 - y0)
+
+
+def interpolate_bom(flow: float, anchors, components) -> pd.DataFrame:
+    anchors = sorted(anchors, key=lambda a: a[0])
+    if flow <= anchors[0][0]:
+        lo = hi = anchors[0]
+    elif flow >= anchors[-1][0]:
+        lo = hi = anchors[-1]
+    else:
+        lo = hi = anchors[-1]
+        for a0, a1 in zip(anchors[:-1], anchors[1:]):
+            if a0[0] <= flow <= a1[0]:
+                lo, hi = a0, a1
+                break
+
+    rows = []
+    for comp, by_label in components.items():
+        low0, high0 = by_label[lo[1]]
+        low1, high1 = by_label[hi[1]]
+        low = lerp(flow, lo[0], hi[0], low0, low1)
+        high = lerp(flow, lo[0], hi[0], high0, high1)
+        rows.append([comp, low, high, 0.5 * (low + high)])
+
+    df = pd.DataFrame(rows, columns=["Component", "Low ($)", "High ($)", "Mid ($)"])
+    total = df[["Low ($)", "High ($)", "Mid ($)"]].sum()
+    df = pd.concat(
+        [df, pd.DataFrame([["TOTAL", total["Low ($)"], total["High ($)"], total["Mid ($)"]]], columns=df.columns)],
+        ignore_index=True,
+    )
+    return df
+
+
+def bom_catalog():
+    # N2 PSA
+    n2_psa_components = {
+        "Air compressor package (oil-free preferred)": {"Small": (20000, 60000), "Medium": (60000, 180000), "Large": (200000, 600000)},
+        "Aftercooler + moisture separator + drains": {"Small": (2000, 8000), "Medium": (5000, 20000), "Large": (15000, 60000)},
+        "Filtration train (particulate + coalescing)": {"Small": (1000, 5000), "Medium": (3000, 12000), "Large": (8000, 30000)},
+        "Air dryer (refrigerated/desiccant) + dewpoint": {"Small": (5000, 25000), "Medium": (15000, 70000), "Large": (40000, 180000)},
+        "PSA vessels + adsorbent (CMS)": {"Small": (15000, 60000), "Medium": (60000, 220000), "Large": (200000, 800000)},
+        "Valve manifold + actuators": {"Small": (5000, 25000), "Medium": (20000, 80000), "Large": (60000, 250000)},
+        "N2 buffer tank (receiver)": {"Small": (2000, 10000), "Medium": (8000, 35000), "Large": (25000, 100000)},
+        "Analyzer package (O2 ppm, dewpoint optional)": {"Small": (3000, 15000), "Medium": (5000, 25000), "Large": (10000, 40000)},
+        "PLC/HMI + remote telemetry": {"Small": (5000, 25000), "Medium": (10000, 40000), "Large": (20000, 80000)},
+        "Skid piping, frame, wiring, assembly": {"Small": (10000, 40000), "Medium": (30000, 120000), "Large": (80000, 300000)},
+        "Safety relief/vent routing": {"Small": (1000, 5000), "Medium": (3000, 12000), "Large": (8000, 30000)},
+    }
+    n2_psa_anchors = [(50.0, "Small"), (250.0, "Medium"), (1000.0, "Large")]
+
+    # N2 Membrane
+    n2_mem_components = {
+        "Air compressor package": {"Small": (15000, 50000), "Medium": (50000, 150000), "Large": (180000, 550000)},
+        "Aftercooler + moisture separator": {"Small": (2000, 8000), "Medium": (5000, 20000), "Large": (15000, 60000)},
+        "Filtration + dryer (critical)": {"Small": (6000, 25000), "Medium": (15000, 60000), "Large": (40000, 180000)},
+        "Membrane module(s)": {"Small": (8000, 40000), "Medium": (30000, 140000), "Large": (120000, 450000)},
+        "N2 receiver + regulators": {"Small": (3000, 15000), "Medium": (10000, 40000), "Large": (30000, 120000)},
+        "Analyzer + PLC/HMI": {"Small": (5000, 30000), "Medium": (12000, 50000), "Large": (25000, 90000)},
+        "Skid integration": {"Small": (8000, 35000), "Medium": (25000, 100000), "Large": (70000, 250000)},
+    }
+    n2_mem_anchors = [(50.0, "Small"), (250.0, "Medium"), (1000.0, "Large")]
+
+    # O2 VPSA
+    o2_vpsa_components = {
+        "Air blower / low-pressure compressor": {"Small": (15000, 60000), "Medium": (40000, 140000), "Large": (120000, 400000)},
+        "Aftercooler + filtration train": {"Small": (4000, 20000), "Medium": (10000, 45000), "Large": (30000, 120000)},
+        "Adsorber vessels + zeolite": {"Small": (25000, 120000), "Medium": (80000, 350000), "Large": (250000, 900000)},
+        "Vacuum pump(s) + vacuum receiver": {"Small": (20000, 120000), "Medium": (70000, 300000), "Large": (200000, 900000)},
+        "Valve manifold + actuators": {"Small": (8000, 40000), "Medium": (25000, 110000), "Large": (80000, 300000)},
+        "O2 receiver tank + regulators": {"Small": (5000, 25000), "Medium": (12000, 60000), "Large": (35000, 160000)},
+        "Analyzer (O2 %) + flow/pressure": {"Small": (4000, 18000), "Medium": (8000, 30000), "Large": (15000, 45000)},
+        "PLC/HMI + telemetry": {"Small": (8000, 35000), "Medium": (15000, 55000), "Large": (25000, 90000)},
+        "Oxygen-compatible piping/cleaning + skid": {"Small": (15000, 70000), "Medium": (40000, 160000), "Large": (120000, 450000)},
+        "Safety relief/vent routing": {"Small": (2000, 10000), "Medium": (5000, 20000), "Large": (12000, 45000)},
+    }
+    o2_vpsa_anchors = [(50.0, "Small"), (150.0, "Medium"), (500.0, "Large")]
+
+    # CO2 conditioning + storage (rough)
+    co2_components = {
+        "Bulk liquid CO2 storage tank(s) + foundations": (60000, 220000),
+        "Vaporizer / heater + controls": (12000, 55000),
+        "Transfer pump(s) / pressure builder": (8000, 45000),
+        "Piping/valves/regulators + install": (20000, 90000),
+        "Instrumentation (pressure/flow/temp) + QA": (8000, 45000),
+        "PLC/HMI + telemetry": (8000, 45000),
+        "Safety relief / venting / ODH signage": (5000, 25000),
     }
 
-def default_loads():
-    return pd.DataFrame([
-        {"gas": "Nitrogen (N2)", "avg_flow": 250.0, "unit": "Nm3/h", "annual_units": None, "backup_tanks": True, "purity_case": "Industrial (99.9%) + High (5N)"},
-        {"gas": "Oxygen (O2)", "avg_flow": 150.0, "unit": "Nm3/h", "annual_units": None, "backup_tanks": True, "purity_case": "Industrial (90–95%) + High (99.5%+)"},
-        {"gas": "Carbon Dioxide (CO2)", "avg_flow": None, "unit": "t/yr", "annual_units": 2000.0, "backup_tanks": "Optional", "purity_case": "Industrial (food/bev)"},
-        {"gas": "Ammonia (NH3)", "avg_flow": None, "unit": "t/yr", "annual_units": 0.0, "backup_tanks": "Optional", "purity_case": "Buffer / import vector"},
-    ])
+    return {
+        "N2 PSA": (n2_psa_anchors, n2_psa_components),
+        "N2 Membrane": (n2_mem_anchors, n2_mem_components),
+        "O2 VPSA/VSA": (o2_vpsa_anchors, o2_vpsa_components),
+        "CO2 Conditioning+Storage": co2_components,
+    }
 
-def default_tech_library():
-    cols = ["gas","option","category","trl","capex_installed","kwh_per_unit","var_opex_per_unit","fixed_om_pct","labor_per_year","notes","base_demand_value","base_demand_unit"]
+
+def bom_co2(demand_tpy: float, base_tpy: float = 2000.0, exponent: float = 0.70) -> pd.DataFrame:
+    comps = bom_catalog()["CO2 Conditioning+Storage"]
+    rows = []
+    ratio = (demand_tpy / base_tpy) ** exponent if base_tpy > 0 and demand_tpy > 0 else 0.0
+    for comp, (lo, hi) in comps.items():
+        low = lo * ratio
+        high = hi * ratio
+        rows.append([comp, low, high, 0.5 * (low + high)])
+    df = pd.DataFrame(rows, columns=["Component", "Low ($)", "High ($)", "Mid ($)"])
+    total = df[["Low ($)", "High ($)", "Mid ($)"]].sum()
+    df = pd.concat([df, pd.DataFrame([["TOTAL", total["Low ($)"], total["High ($)"], total["Mid ($)"]]], columns=df.columns)], ignore_index=True)
+    return df
+
+
+# -----------------------------
+# Tech library (updated defaults)
+# -----------------------------
+def tech_library() -> pd.DataFrame:
+    cols = [
+        "gas",
+        "option",
+        "category",
+        "trl",
+        "capex_installed",
+        "kwh_per_unit",
+        "var_opex_per_unit",
+        "fixed_om_pct",
+        "labor_per_year",
+        "notes",
+        "base_demand_value",
+        "base_demand_unit",
+        "bom_family",
+    ]
     rows = [
-        ["Nitrogen (N2)","Incumbent: LIN delivered + tank","Incumbent",9,200000,0.0,0.32,0.02,5000,"Delivered LIN baseline; includes tank rental/handling",250.0,"Nm3/h"],
-        ["Nitrogen (N2)","Platform: On-site PSA (99.9%)","Platform",9,500000,0.30,0.0,0.05,15000,"Deletes deliveries; OPEX mainly power + service",250.0,"Nm3/h"],
-        ["Nitrogen (N2)","Platform: PSA + purifier (5N)","Platform",9,900000,0.45,0.0,0.05,20000,"High purity via purifier; higher kWh and CAPEX",250.0,"Nm3/h"],
+        # N2
+        ["Nitrogen (N2)", "Incumbent: LIN delivered + tank", "Incumbent", 9, 150000, 0.0, 0.22, 0.02, 5000,
+         "Bulk LIN delivery + onsite tank handling (price varies by region/contract).", 250.0, "Nm3/h", ""],
+        ["Nitrogen (N2)", "Platform: On-site PSA (99.9%)", "Platform", 9, 450000, 0.28, 0.0, 0.05, 12000,
+         "Industrial purity PSA; avoids trucking.", 250.0, "Nm3/h", "N2 PSA"],
+        ["Nitrogen (N2)", "Platform: PSA + purifier (5N)", "Platform", 9, 800000, 0.42, 0.0, 0.05, 16000,
+         "High purity; higher capex + kWh.", 250.0, "Nm3/h", "N2 PSA"],
+        ["Nitrogen (N2)", "Platform: Membrane N2 (95–99%)", "Platform", 9, 300000, 0.25, 0.0, 0.04, 9000,
+         "Lower capex; purity depends on staging.", 250.0, "Nm3/h", "N2 Membrane"],
 
-        ["Oxygen (O2)","Incumbent: LOX delivered + tank","Incumbent",9,250000,0.0,0.33,0.02,5000,"Delivered LOX baseline; trucks + storage",150.0,"Nm3/h"],
-        ["Oxygen (O2)","Platform: VPSA (90–95%)","Platform",9,700000,0.45,0.0,0.05,15000,"Best fit for industrial purity; LOX backup for peaks",150.0,"Nm3/h"],
-        ["Oxygen (O2)","Platform: micro-cryo ASU (99.5%+)","Platform",9,3000000,0.80,0.0,0.05,30000,"High purity is purity-driven; cost higher but reliable",150.0,"Nm3/h"],
+        # O2
+        ["Oxygen (O2)", "Incumbent: LOX delivered + tank", "Incumbent", 9, 200000, 0.0, 0.30, 0.02, 5000,
+         "Bulk LOX delivery + tank; logistics-heavy.", 150.0, "Nm3/h", ""],
+        ["Oxygen (O2)", "Platform: VPSA (90–95%)", "Platform", 9, 850000, 0.55, 0.0, 0.05, 18000,
+         "Industrial oxygen; best for glass/metals/wastewater. Add LOX backup if needed.", 150.0, "Nm3/h", "O2 VPSA/VSA"],
+        ["Oxygen (O2)", "Platform: micro-cryo ASU (99.5%+)", "Platform", 9, 3500000, 0.90, 0.0, 0.05, 40000,
+         "High purity; higher capex.", 150.0, "Nm3/h", ""],
 
-        ["Carbon Dioxide (CO2)","Incumbent: Liquid CO2 delivered + tank","Incumbent",9,150000,0.0,590.0,0.02,5000,"Delivered CO2 $/t placeholder",2000.0,"t/yr"],
-        ["Carbon Dioxide (CO2)","Platform: Conditioning + storage (no capture)","Platform",9,500000,50.0,0.0,0.05,15000,"Wins on uptime and supply assurance; needs offtake",2000.0,"t/yr"],
+        # CO2
+        ["Carbon Dioxide (CO2)", "Incumbent: Liquid CO2 delivered + tank (industrial)", "Incumbent", 9, 120000, 0.0, 350.0, 0.02, 4000,
+         "Delivered LCO2 industrial grade (placeholder).", 2000.0, "t/yr", ""],
+        ["Carbon Dioxide (CO2)", "Incumbent: Liquid CO2 delivered + tank (food/bev)", "Incumbent", 9, 120000, 0.0, 450.0, 0.02, 4000,
+         "Delivered LCO2 food/bev (placeholder).", 2000.0, "t/yr", ""],
+        ["Carbon Dioxide (CO2)", "Platform: Conditioning + storage (no capture)", "Platform", 9, 400000, 15.0, 0.0, 0.05, 12000,
+         "Supply assurance + uptime SLA; does not create CO2.", 2000.0, "t/yr", "CO2 Conditioning+Storage"],
 
-        ["Ammonia (NH3)","Incumbent: Delivered NH3 + tank","Incumbent",9,300000,0.0,450.0,0.02,5000,"Delivered NH3 $/t placeholder",1000.0,"t/yr"],
-        ["Ammonia (NH3)","Platform: NH3 storage + handling + optional cracking","Platform",6,2000000,0.0,0.0,0.05,20000,"Optional resilience buffer; cracking adds capex/energy",1000.0,"t/yr"],
+        # NH3 placeholder
+        ["Ammonia (NH3)", "Incumbent: Delivered NH3 + tank", "Incumbent", 9, 250000, 0.0, 450.0, 0.02, 5000,
+         "Optional / vector use-case dependent.", 1000.0, "t/yr", ""],
+        ["Ammonia (NH3)", "Platform: NH3 storage + handling (optional)", "Platform", 6, 1200000, 0.0, 0.0, 0.05, 16000,
+         "Optional resilience buffer.", 1000.0, "t/yr", ""],
     ]
     return pd.DataFrame(rows, columns=cols)
 
-# -----------------------------
-# Streamlit
-# -----------------------------
-st.set_page_config(page_title="Modular On-Site Gas Utility TEA", layout="wide")
-st.title("Unified TEA — Modular On-Site Gas Utility Platform")
-st.caption("Compare incumbent delivered gases vs modular on-site platform options (N₂ / O₂ / CO₂ / NH₃).")
 
-assm = default_assumptions()
+def default_loads() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"gas": "Nitrogen (N2)", "avg_flow": 250.0, "unit": "Nm3/h", "annual_units": None},
+        {"gas": "Oxygen (O2)", "avg_flow": 150.0, "unit": "Nm3/h", "annual_units": None},
+        {"gas": "Carbon Dioxide (CO2)", "avg_flow": None, "unit": "t/yr", "annual_units": 2000.0},
+        {"gas": "Ammonia (NH3)", "avg_flow": None, "unit": "t/yr", "annual_units": 0.0},
+    ])
+
+
+# -----------------------------
+# Streamlit app
+# -----------------------------
+st.set_page_config(page_title="Gas Utility TEA", layout="wide")
+st.title("Modular On-Site Gas Utility TEA")
+st.caption("Pick one gas, size the requirement, compare incumbent vs platform, and view customer economics + company economics.")
+
+tech_df_base = tech_library()
 loads_df = default_loads()
-tech_df = default_tech_library()
 
 with st.sidebar:
-    st.header("Assumptions")
-    assm["electricity_price"] = st.number_input("Electricity price ($/kWh)", value=float(assm["electricity_price"]), step=0.01, format="%.3f")
-    assm["wacc"] = st.number_input("WACC", value=float(assm["wacc"]), step=0.01, format="%.3f")
-    assm["project_life"] = st.number_input("Project life (years)", value=int(assm["project_life"]), step=1)
-    assm["capacity_factor"] = st.number_input("Capacity factor", value=float(assm["capacity_factor"]), step=0.01, format="%.3f")
-    assm["contingency_pct"] = st.number_input("Contingency (fraction of installed CAPEX)", value=float(assm["contingency_pct"]), step=0.01, format="%.3f")
-    assm["capex_scaling_exponent"] = st.number_input("CAPEX scaling exponent", value=float(assm["capex_scaling_exponent"]), step=0.05, format="%.2f")
-    assm["include_shared_labor_in_lcog"] = st.checkbox("Include shared labor inside per-gas LCOG", value=bool(assm["include_shared_labor_in_lcog"]))
-    assm["shared_labor_pool"] = st.number_input("Shared labor pool ($/yr)", value=float(assm["shared_labor_pool"]), step=5000.0)
+    st.header("Select gas")
+    gas = st.selectbox("Gas", options=loads_df["gas"].tolist(), index=0)
 
     st.divider()
-    st.header("Site scaling")
-    scale_mult = st.slider("Scale demand vs anchor site", 0.1, 10.0, 1.0, 0.1)
+    st.header("Global assumptions")
+    electricity_price = st.number_input("Electricity price ($/kWh)", value=0.10, step=0.01, format="%.3f")
+    wacc = st.number_input("WACC", value=0.12, step=0.01, format="%.3f")
+    project_life = st.number_input("Project life (years)", value=10, step=1)
+    capacity_factor = st.number_input("Capacity factor", value=0.90, step=0.01, format="%.3f")
+    contingency_pct = st.number_input("Contingency (fraction of installed CAPEX)", value=0.15, step=0.01, format="%.3f")
+    capex_scaling_exponent = st.number_input("CAPEX scaling exponent", value=0.70, step=0.05, format="%.2f")
 
-# Scale loads
-loads = loads_df.copy()
-for i, r in loads.iterrows():
-    if r["unit"] == "Nm3/h" and pd.notnull(r["avg_flow"]):
-        loads.loc[i, "avg_flow"] = float(r["avg_flow"]) * scale_mult
-    if r["unit"] == "t/yr" and pd.notnull(r["annual_units"]):
-        loads.loc[i, "annual_units"] = float(r["annual_units"]) * scale_mult
+    st.divider()
+    st.header("Company view")
+    integration_factor = st.number_input("Integration factor (BOM→build cost)", value=1.30, step=0.05, format="%.2f")
+    install_factor = st.number_input("Install factor (build→installed)", value=1.25, step=0.05, format="%.2f")
+    target_gross_margin = st.number_input("Target gross margin", value=0.35, step=0.05, format="%.2f")
 
-st.subheader("1) Site loads")
-edited_loads = st.data_editor(
-    loads[["gas","avg_flow","unit","annual_units","backup_tanks","purity_case"]],
-    use_container_width=True,
-    num_rows="fixed"
+# Requirement input for selected gas
+lr = loads_df[loads_df["gas"] == gas].iloc[0].to_dict()
+unit = lr["unit"]
+
+st.subheader("1) Site requirement")
+if unit == "Nm3/h":
+    demand = st.number_input("Average flow (Nm³/h)", value=float(lr["avg_flow"] or 0.0), step=10.0)
+else:
+    demand = st.number_input("Annual demand (t/yr)", value=float(lr["annual_units"] or 0.0), step=100.0)
+
+annual_units_value = annual_units(
+    avg_flow=(demand if unit == "Nm3/h" else None),
+    annual_units_value=(demand if unit == "t/yr" else None),
+    unit=unit,
+    capacity_factor=capacity_factor,
 )
 
-st.subheader("2) Technology selection")
-gas_list = edited_loads["gas"].tolist()
-sel = {}
+st.caption(
+    f"Annual units computed using capacity factor = **{capacity_factor:.2f}** for flow-based gases. "
+    f"Variable OPEX is **$/Nm³** for N₂/O₂ and **$/t** for CO₂/NH₃."
+)
 
-cols = st.columns(4)
-for idx, gas in enumerate(gas_list):
-    options = tech_df[tech_df["gas"] == gas]["option"].tolist()
-    inc_default = [o for o in options if o.startswith("Incumbent")][0] if any(o.startswith("Incumbent") for o in options) else options[0]
-    plat_default = [o for o in options if o.startswith("Platform")][0] if any(o.startswith("Platform") for o in options) else options[-1]
-    with cols[idx % 4]:
-        st.markdown(f"**{gas}**")
-        sel_inc = st.selectbox("Incumbent", options=options, index=options.index(inc_default), key=f"{gas}_inc")
-        sel_plat = st.selectbox("Platform", options=options, index=options.index(plat_default), key=f"{gas}_plat")
-        sel[gas] = {"incumbent": sel_inc, "platform": sel_plat}
+# Tech assumptions editor for selected gas
+st.subheader("2) Technology assumptions (editable)")
+gas_opts = tech_df_base[tech_df_base["gas"] == gas].copy().reset_index(drop=True)
 
-st.subheader("3) Results")
+with st.expander("Edit default CAPEX / kWh / delivered price (optional)", expanded=False):
+    gas_opts = st.data_editor(
+        gas_opts,
+        use_container_width=True,
+        num_rows="fixed",
+        column_config={
+            "capex_installed": st.column_config.NumberColumn("CAPEX installed ($)", format="%.0f"),
+            "kwh_per_unit": st.column_config.NumberColumn("kWh per unit", format="%.3f"),
+            "var_opex_per_unit": st.column_config.NumberColumn("Variable OPEX ($/unit)", format="%.3f"),
+            "fixed_om_pct": st.column_config.NumberColumn("Fixed O&M (fraction/yr)", format="%.3f"),
+            "labor_per_year": st.column_config.NumberColumn("Labor ($/yr)", format="%.0f"),
+        },
+        disabled=["gas", "category", "notes", "base_demand_unit", "bom_family"],
+    )
 
-# Determine active gases for shared labor split
-active_gases = []
-for _, lr in edited_loads.iterrows():
-    if lr["unit"] == "Nm3/h":
-        v = float(lr["avg_flow"] or 0)
-    else:
-        v = float(lr["annual_units"] or 0)
-    if v > 0:
-        active_gases.append(lr["gas"])
-n_active = max(1, len(active_gases))
-shared_split = 1.0 / n_active
+inc_opts = gas_opts[gas_opts["category"] == "Incumbent"]["option"].tolist()
+plat_opts = gas_opts[gas_opts["category"] == "Platform"]["option"].tolist()
 
-records = []
-breakdowns = {}
+st.subheader("3) Choose technologies")
+c1, c2 = st.columns(2)
+with c1:
+    incumbent_choice = st.selectbox("Incumbent option", options=inc_opts, index=0)
+with c2:
+    platform_choice = st.selectbox("Platform option", options=plat_opts, index=0)
 
-for _, lr in edited_loads.iterrows():
-    gas = lr["gas"]
-    load_row = lr.to_dict()
-    annual_units = annual_units_from_load(load_row, assm["capacity_factor"])
-    demand_value = float(load_row["avg_flow"]) if load_row["unit"] == "Nm3/h" else float(load_row["annual_units"])
+inc = gas_opts[gas_opts["option"] == incumbent_choice].iloc[0].to_dict()
+plat = gas_opts[gas_opts["option"] == platform_choice].iloc[0].to_dict()
 
-    for scenario in ["incumbent", "platform"]:
-        opt_name = sel[gas][scenario]
-        opt = tech_df[(tech_df["gas"] == gas) & (tech_df["option"] == opt_name)].iloc[0].to_dict()
+# Scale capex
+inc_capex = scale_capex(float(inc["capex_installed"]), float(demand), float(inc["base_demand_value"]), capex_scaling_exponent) if demand > 0 else 0.0
+plat_capex = scale_capex(float(plat["capex_installed"]), float(demand), float(plat["base_demand_value"]), capex_scaling_exponent) if demand > 0 else 0.0
 
-        base_demand = float(opt.get("base_demand_value", demand_value if demand_value > 0 else 1.0))
-        capex_scaled = scale_capex(float(opt["capex_installed"]), demand_value, base_demand, assm["capex_scaling_exponent"])
+# TEA
+inc_lcog, inc_br = lcog(
+    annual_units_value=annual_units_value,
+    capex_installed=inc_capex,
+    wacc=wacc,
+    project_life=int(project_life),
+    contingency_pct=contingency_pct,
+    fixed_om_pct=float(inc["fixed_om_pct"]),
+    labor_per_year=float(inc["labor_per_year"]),
+    electricity_price=electricity_price,
+    kwh_per_unit=float(inc["kwh_per_unit"]),
+    variable_opex_per_unit=float(inc["var_opex_per_unit"]),
+)
+plat_lcog, plat_br = lcog(
+    annual_units_value=annual_units_value,
+    capex_installed=plat_capex,
+    wacc=wacc,
+    project_life=int(project_life),
+    contingency_pct=contingency_pct,
+    fixed_om_pct=float(plat["fixed_om_pct"]),
+    labor_per_year=float(plat["labor_per_year"]),
+    electricity_price=electricity_price,
+    kwh_per_unit=float(plat["kwh_per_unit"]),
+    variable_opex_per_unit=float(plat["var_opex_per_unit"]),
+)
 
-        lcog_val, br = lcog(
-            annual_units=annual_units,
-            capex_installed=capex_scaled,
-            wacc=assm["wacc"],
-            project_life=int(assm["project_life"]),
-            contingency_pct=assm["contingency_pct"],
-            fixed_om_pct=float(opt["fixed_om_pct"]),
-            labor_per_year=float(opt["labor_per_year"]),
-            electricity_price=assm["electricity_price"],
-            kwh_per_unit=float(opt["kwh_per_unit"]),
-            variable_opex_per_unit=float(opt["var_opex_per_unit"]),
-            include_shared_labor=assm["include_shared_labor_in_lcog"],
-            shared_labor_pool=assm["shared_labor_pool"],
-            shared_labor_split=shared_split,
-        )
+inc_annual = inc_br.get("Total annual", float("nan"))
+plat_annual = plat_br.get("Total annual", float("nan"))
+annual_savings = inc_annual - plat_annual if (not math.isnan(inc_annual) and not math.isnan(plat_annual)) else float("nan")
 
-        records.append({
-            "Gas": gas,
-            "Scenario": scenario.title(),
-            "Option": opt_name,
-            "TRL": int(opt["trl"]),
-            "Demand (avg)": demand_value,
-            "Demand unit": load_row["unit"],
-            "Annual units": annual_units,
-            "CAPEX installed ($)": capex_scaled,
-            "LCOG ($/unit)": lcog_val,
-            "Avg power (kW)": avg_power_kw(load_row, float(opt["kwh_per_unit"])),
-        })
-        breakdowns[(gas, scenario)] = br
+inc_capex_total = inc_capex * (1 + contingency_pct)
+plat_capex_total = plat_capex * (1 + contingency_pct)
+delta_capex = plat_capex_total - inc_capex_total
+simple_payback = (delta_capex / annual_savings) if (annual_savings and annual_savings > 0 and delta_capex > 0) else float("nan")
 
-res_df = pd.DataFrame(records)
-
-def site_total_annual_cost(scenario: str) -> float:
-    df = res_df[res_df["Scenario"] == scenario.title()]
-    tot = 0.0
-    for gas in df["Gas"].unique():
-        tot += breakdowns.get((gas, scenario), {}).get("Total annual", 0.0)
-    # If shared labor not inside per-gas LCOG, add once at site level
-    if not assm["include_shared_labor_in_lcog"] and len(active_gases) > 0:
-        tot += assm["shared_labor_pool"]
-    return tot
-
-inc_total = site_total_annual_cost("incumbent")
-plat_total = site_total_annual_cost("platform")
-annual_savings = inc_total - plat_total
-
-inc_capex = res_df[res_df["Scenario"] == "Incumbent"]["CAPEX installed ($)"].sum() * (1 + assm["contingency_pct"])
-plat_capex = res_df[res_df["Scenario"] == "Platform"]["CAPEX installed ($)"].sum() * (1 + assm["contingency_pct"])
-delta_capex = plat_capex - inc_capex
-payback = (delta_capex / annual_savings) if (annual_savings > 0 and delta_capex > 0) else float("nan")
-total_power_mw = res_df[res_df["Scenario"] == "Platform"]["Avg power (kW)"].sum() / 1000.0
-
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total annual cost (Incumbent)", f"${inc_total:,.0f}/yr")
-c2.metric("Total annual cost (Platform)", f"${plat_total:,.0f}/yr")
-c3.metric("Annual savings", f"${annual_savings:,.0f}/yr")
-c4.metric("Platform electric load", f"{total_power_mw:.3f} MW")
-
-pivot = res_df.pivot_table(index="Gas", columns="Scenario", values="LCOG ($/unit)", aggfunc="first").reset_index()
-pivot["Savings (%)"] = (1 - (pivot["Platform"] / pivot["Incumbent"])) * 100
-st.markdown("### Per-gas LCOG")
-st.dataframe(pivot, use_container_width=True)
-
-st.markdown("### LCOG comparison")
-fig, ax = plt.subplots()
-x = np.arange(len(pivot["Gas"]))
-w = 0.35
-ax.bar(x - w/2, pivot["Incumbent"], w, label="Incumbent")
-ax.bar(x + w/2, pivot["Platform"], w, label="Platform")
-ax.set_xticks(x)
-ax.set_xticklabels(pivot["Gas"], rotation=25, ha="right")
-ax.set_ylabel("LCOG ($/unit)")
-ax.legend()
-st.pyplot(fig, use_container_width=True)
-
-st.markdown("### Cost breakdown (pick a gas + scenario)")
-b1, b2 = st.columns(2)
-gas_pick = b1.selectbox("Gas", options=gas_list, index=0)
-scen_pick = b2.selectbox("Scenario", options=["Incumbent", "Platform"], index=1)
-
-br = breakdowns.get((gas_pick, scen_pick.lower()), {})
-if br:
-    br_df = pd.DataFrame([{"Cost item": k, "Annual $": v} for k, v in br.items()])
-    st.dataframe(br_df, use_container_width=True)
+st.subheader("4) Results (customer economics)")
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Annual units", f"{annual_units_value:,.0f} Nm³/yr" if unit == "Nm3/h" else f"{annual_units_value:,.0f} t/yr")
+m2.metric("Incumbent LCOG", f"${inc_lcog:,.3f}/unit" if not math.isnan(inc_lcog) else "n/a")
+m3.metric("Platform LCOG", f"${plat_lcog:,.3f}/unit" if not math.isnan(plat_lcog) else "n/a")
+if not math.isnan(inc_lcog) and not math.isnan(plat_lcog) and inc_lcog > 0:
+    m4.metric("Savings", f"{(1 - plat_lcog / inc_lcog) * 100:,.1f}%")
 else:
-    st.info("No breakdown available (likely annual units = 0).")
+    m4.metric("Savings", "n/a")
 
-st.subheader("4) Export")
-csv = res_df.to_csv(index=False).encode("utf-8")
-st.download_button("Download results.csv", data=csv, file_name="results.csv", mime="text/csv")
+m5, m6, m7, m8 = st.columns(4)
+m5.metric("Incumbent installed CAPEX", f"${inc_capex_total:,.0f}")
+m6.metric("Platform installed CAPEX", f"${plat_capex_total:,.0f}")
+m7.metric("Annual savings", f"${annual_savings:,.0f}/yr" if not math.isnan(annual_savings) else "n/a")
+m8.metric("Simple payback", f"{simple_payback:,.1f} yrs" if not math.isnan(simple_payback) else "n/a")
+
+st.markdown("### Cost breakdown")
+t1, t2 = st.columns(2)
+with t1:
+    st.markdown(f"**Incumbent: {incumbent_choice}**")
+    if inc_br:
+        st.dataframe(pd.DataFrame({"Cost item": list(inc_br.keys()), "Annual $": list(inc_br.values())}), use_container_width=True)
+    else:
+        st.info("No result (annual units is zero).")
+with t2:
+    st.markdown(f"**Platform: {platform_choice}**")
+    if plat_br:
+        st.dataframe(pd.DataFrame({"Cost item": list(plat_br.keys()), "Annual $": list(plat_br.values())}), use_container_width=True)
+    else:
+        st.info("No result (annual units is zero).")
+
+if inc_br and plat_br:
+    st.markdown("### Annual cost comparison")
+    fig, ax = plt.subplots()
+    labels = ["CAPEX", "Fixed O&M", "Labor", "Electricity", "Variable OPEX"]
+    inc_vals = [inc_br.get("Annualized CAPEX", 0), inc_br.get("Fixed O&M", 0), inc_br.get("Labor", 0), inc_br.get("Electricity", 0), inc_br.get("Variable OPEX", 0)]
+    plat_vals = [plat_br.get("Annualized CAPEX", 0), plat_br.get("Fixed O&M", 0), plat_br.get("Labor", 0), plat_br.get("Electricity", 0), plat_br.get("Variable OPEX", 0)]
+
+    x = np.arange(len(labels))
+    w = 0.35
+    ax.bar(x - w / 2, inc_vals, w, label="Incumbent")
+    ax.bar(x + w / 2, plat_vals, w, label="Platform")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=20, ha="right")
+    ax.set_ylabel("$/yr")
+    ax.legend()
+    st.pyplot(fig, use_container_width=True)
+
+st.subheader("5) Sizing quick checks")
+inc_kw = avg_power_kw((demand if unit == "Nm3/h" else None), (demand if unit == "t/yr" else None), unit, float(inc["kwh_per_unit"]))
+plat_kw = avg_power_kw((demand if unit == "Nm3/h" else None), (demand if unit == "t/yr" else None), unit, float(plat["kwh_per_unit"]))
+c3, c4 = st.columns(2)
+c3.metric("Avg electric load (Incumbent)", f"{inc_kw:,.1f} kW")
+c4.metric("Avg electric load (Platform)", f"{plat_kw:,.1f} kW")
+
+st.subheader("6) Company view (BOM → build → installed → sale price)")
+bom_family = str(plat.get("bom_family", "") or "")
+bom_df = None
+
+if gas == "Carbon Dioxide (CO2)" and bom_family == "CO2 Conditioning+Storage":
+    bom_df = bom_co2(float(demand), base_tpy=float(plat["base_demand_value"]), exponent=capex_scaling_exponent)
+elif bom_family in ("N2 PSA", "N2 Membrane", "O2 VPSA/VSA"):
+    anchors, comps = bom_catalog()[bom_family]
+    bom_df = interpolate_bom(float(demand), anchors, comps)
+
+if bom_df is None:
+    st.info("No BOM model attached to this platform option (yet).")
+else:
+    st.dataframe(bom_df, use_container_width=True)
+    bom_mid = float(bom_df[bom_df["Component"] == "TOTAL"]["Mid ($)"].values[0])
+
+    build_cost = bom_mid * integration_factor
+    installed_cost_est = build_cost * install_factor
+    installed_with_cont = installed_cost_est * (1 + contingency_pct)
+    sale_price = installed_with_cont / max(1e-6, (1 - target_gross_margin))
+
+    company = pd.DataFrame(
+        [
+            ["BOM mid (equipment)", bom_mid],
+            ["Build cost (BOM × integration)", build_cost],
+            ["Installed cost (build × install)", installed_cost_est],
+            ["Installed + contingency", installed_with_cont],
+            ["Suggested sale price (target GM)", sale_price],
+        ],
+        columns=["Item", "$"],
+    )
+    st.dataframe(company, use_container_width=True)
+
+st.subheader("7) Export")
+out = pd.DataFrame([
+    {"Gas": gas, "Scenario": "Incumbent", "Option": incumbent_choice, "Annual units": annual_units_value, "CAPEX installed ($)": inc_capex, "CAPEX+cont ($)": inc_capex_total,
+     "LCOG ($/unit)": inc_lcog, "Annual cost ($/yr)": inc_annual, "Avg power (kW)": inc_kw},
+    {"Gas": gas, "Scenario": "Platform", "Option": platform_choice, "Annual units": annual_units_value, "CAPEX installed ($)": plat_capex, "CAPEX+cont ($)": plat_capex_total,
+     "LCOG ($/unit)": plat_lcog, "Annual cost ($/yr)": plat_annual, "Avg power (kW)": plat_kw},
+])
+st.download_button("Download selected_gas_results.csv", data=out.to_csv(index=False).encode("utf-8"),
+                   file_name="selected_gas_results.csv", mime="text/csv")

@@ -225,8 +225,17 @@ def flow_svg(title: str, blocks: List[str], note: str = "", dashed: Optional[Lis
 
 
 def render_flow(title: str, blocks: List[str], note: str = "", dashed: Optional[List[Tuple[int, int, str]]] = None):
-    st.markdown(flow_svg(title, blocks, note=note, dashed=dashed), unsafe_allow_html=True)
+    svg = flow_svg(title, blocks, note=note, dashed=dashed)
 
+    components.html(
+        f"""
+        <div style="width: 100%; background: transparent;">
+            {svg}
+        </div>
+        """,
+        height=240,
+        scrolling=False,
+    )
 
 # =============================
 # BOM (range-based quick estimator)

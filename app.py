@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-
+if gas.startswith("Oxygen") and demand < 400:
+    st.info("At <400 Nm³/h, consider: (1) delivered LOX, or (2) Hybrid VPSA base-load + LOX peaks, to avoid small-system CAPEX penalty.")
 # -----------------------------
 # Finance + TEA utilities
 # -----------------------------
@@ -268,6 +269,23 @@ def tech_library() -> pd.DataFrame:
          "Same onsite supply + compatibility with higher-pressure distribution.",
          "Booster is a major cost/energy driver; avoid if process can accept low pressure.",
          "Sites needing pressurized O2 header."],
+
+# Oxygen pressure/energy profiles (anchored to public refs)
+O2_PROFILES = {
+    "Low pressure VPSA (≈0.2 barg, no booster)": 0.36,   # Messer VPSA low specific power :contentReference[oaicite:10]{index=10}
+    "Low pressure VSA (≈2.7 psig)": 0.39,               # PATH VSA ref :contentReference[oaicite:11]{index=11}
+    "High pressure PSA (≈65 psig / ~4.5 barg)": 1.20,   # PATH PSA ref :contentReference[oaicite:12]{index=12}
+}
+
+if gas.startswith("Oxygen"):
+    o2_profile = st.selectbox("O₂ delivery pressure class", list(O2_PROFILES.keys()))
+    plat_kwh = O2_PROFILES[o2_profile]
+
+    # Optional: if user chooses high pressure, warn them this is the expensive mode
+    if "High pressure" in o2_profile:
+        st.warning("High-pressure oxygen is expensive. Cheapest route is low-pressure O₂ + avoid boosters; use hybrid if peaks matter.")
+
+
 
         ["Oxygen (O2)", "Industrial (90–93%)", "Nm3/h",
          "Platform: Hybrid (VPSA base-load + LOX peaks)", "Platform", 9,

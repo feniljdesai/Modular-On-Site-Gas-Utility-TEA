@@ -5,6 +5,10 @@ from typing import Dict, Tuple, List, Optional
 import numpy as np
 import pandas as pd
 import streamlit as st
+<<<<<<< HEAD
+=======
+import streamlit.components.v1 as components
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 
 
 # =============================
@@ -146,7 +150,11 @@ def kpi_card(title: str, value: str, sub: str = ""):
 
 
 # =============================
+<<<<<<< HEAD
 # Clean SVG process flow (no matplotlib)
+=======
+# Clean SVG process flow (rendered via components.html)
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 # =============================
 def flow_svg(title: str, blocks: List[str], note: str = "", dashed: Optional[List[Tuple[int, int, str]]] = None) -> str:
     dashed = dashed or []
@@ -158,12 +166,20 @@ def flow_svg(title: str, blocks: List[str], note: str = "", dashed: Optional[Lis
     box_h = 56
     y = 78
 
+<<<<<<< HEAD
     def box(x, txt):
         safe = (
             txt.replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
         )
+=======
+    def esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def box(x, txt):
+        safe = esc(txt)
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
         return f"""
         <g>
           <rect x="{x}" y="{y}" rx="14" ry="14" width="{box_w}" height="{box_h}"
@@ -197,6 +213,7 @@ def flow_svg(title: str, blocks: List[str], note: str = "", dashed: Optional[Lis
         x1 = xs[i0] + box_w / 2
         x2 = xs[i1] + box_w / 2
         dashed_elems += arrow(x1, y + box_h + 18, x2, y + box_h / 2, True)
+<<<<<<< HEAD
         safe_label = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         dashed_elems += f"""<text x="{(x1+x2)/2}" y="{y + box_h + 42}" text-anchor="middle"
                           font-size="12" fill="rgba(15,23,42,0.70)" font-family="Inter, Arial">{safe_label}</text>"""
@@ -206,6 +223,13 @@ def flow_svg(title: str, blocks: List[str], note: str = "", dashed: Optional[Lis
     safe_title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     safe_note = note.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+=======
+        dashed_elems += f"""<text x="{(x1+x2)/2}" y="{y + box_h + 42}" text-anchor="middle"
+                          font-size="12" fill="rgba(15,23,42,0.70)" font-family="Inter, Arial">{esc(label)}</text>"""
+
+    boxes = "".join([box(xs[i], blocks[i]) for i in range(n)])
+
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
     return f"""
     <svg width="100%" viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -214,8 +238,13 @@ def flow_svg(title: str, blocks: List[str], note: str = "", dashed: Optional[Lis
         </marker>
       </defs>
 
+<<<<<<< HEAD
       <text x="{pad}" y="28" font-size="15" fill="#0F172A" font-family="Inter, Arial" font-weight="800">{safe_title}</text>
       <text x="{pad}" y="50" font-size="12" fill="rgba(15,23,42,0.65)" font-family="Inter, Arial">{safe_note}</text>
+=======
+      <text x="{pad}" y="28" font-size="15" fill="#0F172A" font-family="Inter, Arial" font-weight="800">{esc(title)}</text>
+      <text x="{pad}" y="50" font-size="12" fill="rgba(15,23,42,0.65)" font-family="Inter, Arial">{esc(note)}</text>
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 
       {arrows}
       {boxes}
@@ -226,7 +255,10 @@ def flow_svg(title: str, blocks: List[str], note: str = "", dashed: Optional[Lis
 
 def render_flow(title: str, blocks: List[str], note: str = "", dashed: Optional[List[Tuple[int, int, str]]] = None):
     svg = flow_svg(title, blocks, note=note, dashed=dashed)
+<<<<<<< HEAD
 
+=======
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
     components.html(
         f"""
         <div style="width: 100%; background: transparent;">
@@ -237,6 +269,10 @@ def render_flow(title: str, blocks: List[str], note: str = "", dashed: Optional[
         scrolling=False,
     )
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 # =============================
 # BOM (range-based quick estimator)
 # =============================
@@ -279,8 +315,11 @@ def interpolate_bom(flow, anchors, components) -> pd.DataFrame:
 
 
 def bom_catalog():
+<<<<<<< HEAD
     # These ranges are typical "order-of-magnitude" budgetary buckets. Use as a sanity check / investor story,
     # not as a vendor quote.
+=======
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
     n2_psa_components = {
         "Air compressor package (oil-free preferred)": {"Small": (20000, 60000), "Medium": (60000, 180000), "Large": (200000, 600000)},
         "Aftercooler + moisture separator + drains": {"Small": (2000, 8000), "Medium": (5000, 20000), "Large": (15000, 60000)},
@@ -329,7 +368,10 @@ def bom_catalog():
 
 
 def bom_co2_buffer(demand_tpy: float, base_tpy: float = 2000.0, exponent: float = 0.70) -> pd.DataFrame:
+<<<<<<< HEAD
     # Rough buffer/storage conditioning BOM bucket
+=======
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
     comps = {
         "Bulk liquid CO2 storage tank(s) + foundations": (60000, 220000),
         "Vaporizer / heater + controls": (12000, 55000),
@@ -339,10 +381,14 @@ def bom_co2_buffer(demand_tpy: float, base_tpy: float = 2000.0, exponent: float 
         "PLC/HMI + telemetry": (8000, 45000),
         "Safety relief / venting / ODH signage": (5000, 25000),
     }
+<<<<<<< HEAD
     if demand_tpy <= 0:
         ratio = 0.0
     else:
         ratio = (demand_tpy / base_tpy) ** exponent
+=======
+    ratio = (demand_tpy / base_tpy) ** exponent if demand_tpy > 0 and base_tpy > 0 else 0.0
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 
     rows = []
     for comp, (lo, hi) in comps.items():
@@ -363,6 +409,7 @@ def bom_co2_buffer(demand_tpy: float, base_tpy: float = 2000.0, exponent: float 
 # Technology library (defaults tuned)
 # =============================
 def tech_library() -> pd.DataFrame:
+<<<<<<< HEAD
     """
     Defaults are chosen to be plausible and easy to defend:
       - N2 PSA kWh/Nm3 in the ~0.3–0.6 band (we set mid default).
@@ -386,14 +433,30 @@ def tech_library() -> pd.DataFrame:
         "why",
         "best_fit",
         "watchouts",
+=======
+    cols = [
+        "gas", "purity_tier", "unit", "option", "category", "trl",
+        "capex_installed", "kwh_per_unit", "var_opex_per_unit",
+        "fixed_om_frac", "labor_per_year",
+        "base_demand_value", "capex_scale_exp",
+        "why", "best_fit", "watchouts",
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
         "bom_family",
     ]
 
     rows = [
+<<<<<<< HEAD
         # ---------------- N2 ----------------
         ["Nitrogen (N2)", "Industrial (99.9%)", "Nm3/h",
          "Incumbent: LIN delivered + tank", "Incumbent", 9,
          150000, 0.00, 0.22, 0.02, 5000,
+=======
+        # N2
+        ["Nitrogen (N2)", "Industrial (99.9%)", "Nm3/h",
+         "Incumbent: LIN delivered + tank", "Incumbent", 9,
+         150000, 0.00, 0.22,
+         0.02, 5000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          250.0, 0.70,
          "Fast deployment and simple operations.",
          "Small or temporary demand; highly variable usage.",
@@ -402,7 +465,12 @@ def tech_library() -> pd.DataFrame:
 
         ["Nitrogen (N2)", "Industrial (99.9%)", "Nm3/h",
          "Platform: PSA N2 (99.9%)", "Platform", 9,
+<<<<<<< HEAD
          450000, 0.45, 0.00, 0.05, 12000,
+=======
+         450000, 0.45, 0.00,
+         0.05, 12000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          250.0, 0.70,
          "Deletes trucking. Predictable OPEX. Good economics at steady demand.",
          "Steady industrial demand (heat treat, metals, glass, packaging).",
@@ -411,7 +479,12 @@ def tech_library() -> pd.DataFrame:
 
         ["Nitrogen (N2)", "Industrial (99.9%)", "Nm3/h",
          "Platform: Membrane N2 (95–99%)", "Platform", 9,
+<<<<<<< HEAD
          300000, 0.30, 0.00, 0.04, 9000,
+=======
+         300000, 0.30, 0.00,
+         0.04, 9000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          250.0, 0.70,
          "Lower CAPEX and simpler than PSA; quick install.",
          "Smaller sites that can tolerate lower purity.",
@@ -420,7 +493,12 @@ def tech_library() -> pd.DataFrame:
 
         ["Nitrogen (N2)", "High purity (5N)", "Nm3/h",
          "Incumbent: LIN delivered + tank (5N contract)", "Incumbent", 9,
+<<<<<<< HEAD
          150000, 0.00, 0.28, 0.02, 5000,
+=======
+         150000, 0.00, 0.28,
+         0.02, 5000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          250.0, 0.70,
          "Easiest path to high purity with minimal onsite complexity.",
          "Any high purity site without operator appetite.",
@@ -429,17 +507,30 @@ def tech_library() -> pd.DataFrame:
 
         ["Nitrogen (N2)", "High purity (5N)", "Nm3/h",
          "Platform: PSA + purifier (5N)", "Platform", 9,
+<<<<<<< HEAD
          800000, 0.55, 0.00, 0.05, 16000,
+=======
+         800000, 0.55, 0.00,
+         0.05, 16000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          250.0, 0.70,
          "High purity onsite while reducing logistics dependency.",
          "High-purity inerting and specialty processing at steady loads.",
          "Higher CAPEX and power; purifier adds complexity.",
          "N2 PSA"],
 
+<<<<<<< HEAD
         # ---------------- O2 ----------------
         ["Oxygen (O2)", "Industrial (90–93%)", "Nm3/h",
          "Incumbent: LOX delivered + tank", "Incumbent", 9,
          200000, 0.00, 0.30, 0.02, 5000,
+=======
+        # O2
+        ["Oxygen (O2)", "Industrial (90–93%)", "Nm3/h",
+         "Incumbent: LOX delivered + tank", "Incumbent", 9,
+         200000, 0.00, 0.30,
+         0.02, 5000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          150.0, 0.70,
          "Simple: buy oxygen, consume oxygen.",
          "Low/moderate or very peaky demand.",
@@ -448,7 +539,12 @@ def tech_library() -> pd.DataFrame:
 
         ["Oxygen (O2)", "Industrial (90–93%)", "Nm3/h",
          "Platform: VPSA O2 (low pressure)", "Platform", 9,
+<<<<<<< HEAD
          700000, 0.36, 0.00, 0.05, 18000,
+=======
+         700000, 0.36, 0.00,
+         0.05, 18000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          150.0, 0.70,
          "Cheapest onsite O2 mode: keep pressure low, avoid booster penalty.",
          "Glass/metals/wastewater enrichment at low pressure.",
@@ -457,7 +553,12 @@ def tech_library() -> pd.DataFrame:
 
         ["Oxygen (O2)", "Industrial (90–93%)", "Nm3/h",
          "Platform: VPSA O2 + booster (6 barg)", "Platform", 9,
+<<<<<<< HEAD
          900000, 0.55, 0.00, 0.05, 20000,
+=======
+         900000, 0.55, 0.00,
+         0.05, 20000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          150.0, 0.70,
          "Onsite O2 compatible with higher-pressure distribution.",
          "Sites with pressurized O2 header.",
@@ -466,7 +567,12 @@ def tech_library() -> pd.DataFrame:
 
         ["Oxygen (O2)", "Industrial (90–93%)", "Nm3/h",
          "Platform: Hybrid (VPSA base-load + LOX peaks)", "Platform", 9,
+<<<<<<< HEAD
          650000, 0.36, 0.00, 0.05, 18000,
+=======
+         650000, 0.36, 0.00,
+         0.05, 18000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          150.0, 0.70,
          "Lower CAPEX (don’t oversize). LOX covers peaks and maintenance windows.",
          "Customers who want uptime without oversizing.",
@@ -475,7 +581,12 @@ def tech_library() -> pd.DataFrame:
 
         ["Oxygen (O2)", "High purity (99.5%+)", "Nm3/h",
          "Incumbent: LOX delivered + tank (high purity)", "Incumbent", 9,
+<<<<<<< HEAD
          200000, 0.00, 0.33, 0.02, 5000,
+=======
+         200000, 0.00, 0.33,
+         0.02, 5000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          150.0, 0.70,
          "High purity supply without owning a plant.",
          "Sites that require high purity but don’t want cryo complexity.",
@@ -484,17 +595,30 @@ def tech_library() -> pd.DataFrame:
 
         ["Oxygen (O2)", "High purity (99.5%+)", "Nm3/h",
          "Platform: micro-cryo ASU (99.5%+)", "Platform", 9,
+<<<<<<< HEAD
          3500000, 0.90, 0.00, 0.05, 40000,
+=======
+         3500000, 0.90, 0.00,
+         0.05, 40000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          150.0, 0.70,
          "Onsite high purity where purity and SLA justify it.",
          "High-purity must-have sites with steady demand.",
          "High CAPEX and complexity; typically bigger sites.",
          ""],
 
+<<<<<<< HEAD
         # ---------------- CO2 ----------------
         ["Carbon Dioxide (CO2)", "Industrial", "t/yr",
          "Incumbent: LCO2 delivered + tank (industrial)", "Incumbent", 9,
          120000, 0.00, 350.0, 0.02, 4000,
+=======
+        # CO2
+        ["Carbon Dioxide (CO2)", "Industrial", "t/yr",
+         "Incumbent: LCO2 delivered + tank (industrial)", "Incumbent", 9,
+         120000, 0.00, 350.0,
+         0.02, 4000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          2000.0, 0.70,
          "Simplest when supply is stable.",
          "Non-critical industrial uses.",
@@ -503,7 +627,12 @@ def tech_library() -> pd.DataFrame:
 
         ["Carbon Dioxide (CO2)", "Food/Bev", "t/yr",
          "Incumbent: LCO2 delivered + tank (food/bev)", "Incumbent", 9,
+<<<<<<< HEAD
          120000, 0.00, 450.0, 0.02, 4000,
+=======
+         120000, 0.00, 450.0,
+         0.02, 4000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          2000.0, 0.70,
          "QA handled by supplier.",
          "Food/bev where QA matters.",
@@ -512,7 +641,12 @@ def tech_library() -> pd.DataFrame:
 
         ["Carbon Dioxide (CO2)", "Industrial", "t/yr",
          "Platform: Conditioning + storage (no capture)", "Platform", 9,
+<<<<<<< HEAD
          400000, 15.0, 0.00, 0.05, 12000,
+=======
+         400000, 15.0, 0.00,
+         0.05, 12000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          2000.0, 0.70,
          "You’re selling uptime: buffer + conditioning + telemetry + SLA.",
          "Customers burned by outages.",
@@ -521,7 +655,12 @@ def tech_library() -> pd.DataFrame:
 
         ["Carbon Dioxide (CO2)", "Food/Bev", "t/yr",
          "Platform: Conditioning + storage (no capture)", "Platform", 9,
+<<<<<<< HEAD
          450000, 18.0, 0.00, 0.05, 14000,
+=======
+         450000, 18.0, 0.00,
+         0.05, 14000,
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
          2000.0, 0.70,
          "Same story as industrial, but QA-focused conditioning.",
          "Food/bev where outages are catastrophic.",
@@ -618,12 +757,17 @@ st.markdown(
     """
     <div class="hero">
       <h1>Modular On-Site Gas Utility Platform</h1>
+<<<<<<< HEAD
       <p>Pick one gas, size the requirement, compare incumbent vs platform, and see the economics + the story investors ask for.</p>
+=======
+      <p>Pick one gas, size the requirement, compare incumbent vs platform, and see economics + process flow.</p>
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
     </div>
     """,
     unsafe_allow_html=True,
 )
 
+<<<<<<< HEAD
 # ---- Sidebar controls
 with st.sidebar:
     st.markdown("### Controls")
@@ -636,6 +780,17 @@ with st.sidebar:
     purity_options = tech[tech["gas"] == gas]["purity_tier"].unique().tolist()
     purity = st.selectbox("Purity tier", options=purity_options, index=0)
 
+=======
+with st.sidebar:
+    st.markdown("### Controls")
+    investor_mode = st.toggle("Investor Mode", value=True)
+
+    st.divider()
+    gas = st.selectbox("Gas", options=tech["gas"].unique().tolist(), index=0)
+    purity_options = tech[tech["gas"] == gas]["purity_tier"].unique().tolist()
+    purity = st.selectbox("Purity tier", options=purity_options, index=0)
+
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
     subset = tech[(tech["gas"] == gas) & (tech["purity_tier"] == purity)].copy().reset_index(drop=True)
     unit = subset["unit"].iloc[0]
 
@@ -659,10 +814,14 @@ with st.sidebar:
     peak_frac = st.slider("Hybrid peak fraction (delivered share)", 0.0, 0.60, 0.20, 0.05)
     lox_backup_capex = st.number_input("Hybrid LOX backup CAPEX add ($)", value=150000.0, step=25000.0)
 
+<<<<<<< HEAD
 # ---- Demand input
 st.markdown("<div class='section'>", unsafe_allow_html=True)
 tag = f"<span class='pill'>{gas}</span><span class='pill'>{purity}</span>"
 st.markdown(tag, unsafe_allow_html=True)
+=======
+st.markdown(f"<span class='pill'>{gas}</span><span class='pill'>{purity}</span>", unsafe_allow_html=True)
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 
 default_demand = float(subset["base_demand_value"].iloc[0])
 if unit == "Nm3/h":
@@ -673,12 +832,17 @@ else:
 annual_u = annual_units_from_demand(demand, unit, capacity_factor)
 unit_label = "$/Nm³" if unit == "Nm3/h" else "$/t"
 
+<<<<<<< HEAD
 st.caption(
     f"Annual units: **{annual_u:,.0f}** "
     f"{'Nm³/yr' if unit=='Nm3/h' else 't/yr'}. LCOG is reported in **{unit_label}**."
 )
 
 # ---- Option selection
+=======
+st.caption(f"Annual units: **{annual_u:,.0f}** ({'Nm³/yr' if unit=='Nm3/h' else 't/yr'}). LCOG in **{unit_label}**.")
+
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 inc_opts = subset[subset["category"] == "Incumbent"]["option"].tolist()
 plat_opts = subset[subset["category"] == "Platform"]["option"].tolist()
 
@@ -691,6 +855,7 @@ with c2:
 inc = subset[subset["option"] == incumbent_choice].iloc[0].to_dict()
 plat = subset[subset["option"] == platform_choice].iloc[0].to_dict()
 
+<<<<<<< HEAD
 # ---- Advanced tuning (optional)
 with st.expander("Advanced: tune the scenario inputs (delivered price, kWh, CAPEX)", expanded=False):
     st.write("Use this to match a specific customer contract or a vendor quote.")
@@ -711,6 +876,19 @@ with st.expander("Advanced: tune the scenario inputs (delivered price, kWh, CAPE
 
 # ---- Oxygen “cheap route” lever: pressure profile (only meaningful for O2)
 # (These values are defaults that keep the story defensible: low pressure is cheaper; booster adds a penalty.)
+=======
+with st.expander("Advanced: tune scenario inputs (delivered price, kWh, CAPEX)", expanded=False):
+    a1, a2, a3 = st.columns(3)
+    with a1:
+        inc["var_opex_per_unit"] = st.number_input("Incumbent variable price ($/unit)", value=float(inc["var_opex_per_unit"]), step=0.01 if unit == "Nm3/h" else 10.0)
+        inc["capex_installed"] = st.number_input("Incumbent base CAPEX ($)", value=float(inc["capex_installed"]), step=25000.0)
+    with a2:
+        plat["var_opex_per_unit"] = st.number_input("Platform variable OPEX ($/unit)", value=float(plat["var_opex_per_unit"]), step=0.01 if unit == "Nm3/h" else 10.0)
+        plat["capex_installed"] = st.number_input("Platform base CAPEX ($)", value=float(plat["capex_installed"]), step=25000.0)
+    with a3:
+        plat["kwh_per_unit"] = st.number_input("Platform kWh/unit override", value=float(plat["kwh_per_unit"]), step=0.01)
+
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 O2_PROFILES = {
     "Low pressure (no booster)": 0.36,
     "Pressurized header (booster penalty)": 0.55,
@@ -719,6 +897,7 @@ O2_PROFILES = {
 if gas.startswith("Oxygen") and "VPSA" in platform_choice:
     prof = st.selectbox("O₂ delivery pressure profile", options=list(O2_PROFILES.keys()), index=0)
     plat["kwh_per_unit"] = float(O2_PROFILES[prof])
+<<<<<<< HEAD
     if "Pressurized" in prof:
         st.info("Cost lever: if the process can accept low-pressure O₂, you avoid the booster penalty and the economics improve.")
     if "Conservative" in prof:
@@ -736,6 +915,17 @@ if gas.startswith("Oxygen") and "Hybrid" in platform_choice:
     plat["var_opex_per_unit"] = peak_frac * float(inc["var_opex_per_unit"])
 
 # ---- TEA compute
+=======
+
+inc_capex = scale_capex(float(inc["capex_installed"]), float(demand), float(inc["base_demand_value"]), capex_scale_exp)
+plat_capex = scale_capex(float(plat["capex_installed"]), float(demand), float(plat["base_demand_value"]), capex_scale_exp)
+
+if gas.startswith("Oxygen") and "Hybrid" in platform_choice:
+    base_flow = (1.0 - peak_frac) * float(demand)
+    plat_capex = scale_capex(float(plat["capex_installed"]), base_flow, float(plat["base_demand_value"]), capex_scale_exp) + float(lox_backup_capex)
+    plat["var_opex_per_unit"] = peak_frac * float(inc["var_opex_per_unit"])
+
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 inc_lcog, inc_br = lcog(
     annual_units=annual_u,
     capex_installed=inc_capex,
@@ -770,11 +960,17 @@ plat_capex_total = plat_capex * (1 + contingency_frac)
 delta_capex = plat_capex_total - inc_capex_total
 payback = (delta_capex / annual_savings) if (annual_savings and annual_savings > 0 and delta_capex > 0) else float("nan")
 
+<<<<<<< HEAD
 # power sanity for flow gases
 inc_kw = avg_power_kw(demand, float(inc["kwh_per_unit"])) if unit == "Nm3/h" else 0.0
 plat_kw = avg_power_kw(demand, float(plat["kwh_per_unit"])) if unit == "Nm3/h" else 0.0
 
 # ---- Executive KPIs
+=======
+inc_kw = avg_power_kw(demand, float(inc["kwh_per_unit"])) if unit == "Nm3/h" else 0.0
+plat_kw = avg_power_kw(demand, float(plat["kwh_per_unit"])) if unit == "Nm3/h" else 0.0
+
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 k1, k2, k3, k4 = st.columns(4)
 with k1:
     kpi_card("Annual units", f"{annual_u:,.0f}", "Nm³/yr" if unit == "Nm3/h" else "t/yr")
@@ -801,7 +997,10 @@ with k8:
 if unit == "Nm3/h":
     st.caption(f"Power sanity: Inc ~{inc_kw:,.1f} kW | Platform ~{plat_kw:,.1f} kW (kWh/Nm³ × Nm³/h).")
 
+<<<<<<< HEAD
 # ---- Tabs
+=======
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 tab_overview, tab_econ, tab_process, tab_company, tab_sens, tab_sources = st.tabs(
     ["Overview", "Economics", "Process flow", "Company view", "Sensitivity", "Sources"]
 )
@@ -812,6 +1011,7 @@ with tab_overview:
     st.write(f"• {plat['why']}")
     st.write(f"• Best fit: {plat['best_fit']}")
     st.write(f"• Watch-outs: {plat['watchouts']}")
+<<<<<<< HEAD
     if gas.startswith("Oxygen") and "VPSA" in platform_choice:
         st.write("• Key cost lever for O₂: avoid pressurizing the whole stream if the process can accept low-pressure oxygen.")
     if gas.startswith("Oxygen") and "Hybrid" in platform_choice:
@@ -838,6 +1038,11 @@ with tab_overview:
 
 with tab_econ:
     st.markdown("#### Cost breakdown")
+=======
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with tab_econ:
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
     breakdown = pd.DataFrame(
         [
             ["Annualized CAPEX", inc_br.get("Annualized CAPEX", 0), plat_br.get("Annualized CAPEX", 0)],
@@ -849,22 +1054,32 @@ with tab_econ:
         ],
         columns=["Cost item", "Incumbent ($/yr)", "Platform ($/yr)"],
     )
+<<<<<<< HEAD
     if not investor_mode:
         st.dataframe(breakdown, use_container_width=True)
     else:
         st.dataframe(breakdown.iloc[:-1], use_container_width=True)
 
     st.markdown("#### Payback curve")
+=======
+    st.dataframe(breakdown, use_container_width=True)
+
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
     if not math.isnan(annual_savings) and annual_savings > 0 and delta_capex > 0:
         years = np.arange(0, int(project_life) + 1)
         cum = -delta_capex + annual_savings * years
         st.line_chart(pd.DataFrame({"Cumulative cashflow ($)": cum}, index=years))
+<<<<<<< HEAD
         st.caption("Year 0 is the extra CAPEX; each year adds the annual savings.")
     else:
         st.info("Payback not shown because savings are not positive or platform CAPEX is not higher.")
 
 with tab_process:
     st.markdown("#### Incumbent vs Platform process flow")
+=======
+
+with tab_process:
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
     inc_blocks, inc_note, inc_dashed = flow_for(gas, incumbent_choice)
     plat_blocks, plat_note, plat_dashed = flow_for(gas, platform_choice)
 
@@ -875,9 +1090,12 @@ with tab_process:
         render_flow("Platform", plat_blocks, note=plat_note, dashed=plat_dashed)
 
 with tab_company:
+<<<<<<< HEAD
     st.markdown("#### System cost (company view)")
     st.caption("This is a budgetary cost story: BOM mid → build → installed → suggested sale price.")
 
+=======
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
     bom_df = None
     bom_family = str(plat.get("bom_family", "") or "")
 
@@ -911,6 +1129,7 @@ with tab_company:
         )
         st.dataframe(company, use_container_width=True)
 
+<<<<<<< HEAD
         st.markdown("#### How to make O₂ cheaper (what to tell customers + VCs)")
         if gas.startswith("Oxygen"):
             st.write("• Keep product pressure low when possible: boosters are the cost villain.")
@@ -923,6 +1142,10 @@ with tab_sens:
 
     if unit == "Nm3/h":
         # Sweep electricity price
+=======
+with tab_sens:
+    if unit == "Nm3/h":
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
         ep = np.linspace(0.05, 0.25, 25)
         rows = []
         for e in ep:
@@ -935,6 +1158,7 @@ with tab_sens:
         sdf = pd.DataFrame(rows, columns=["Electricity ($/kWh)", "Incumbent $/yr", "Platform $/yr"]).set_index("Electricity ($/kWh)")
         st.line_chart(sdf)
 
+<<<<<<< HEAD
         # Delivered price multiplier sweep (keep platform fixed)
         st.markdown("#### Delivered price multiplier (contract swing)")
         mult = np.linspace(0.6, 1.6, 21)
@@ -967,6 +1191,19 @@ with tab_sources:
     st.caption("If you want, we can add an internal ‘source note’ column per technology row and show citations inline in the UI.")
 
 # ---- Export
+=======
+with tab_sources:
+    st.code(
+        "\n".join([
+            "DOE TECHTEST overview: https://www.energy.gov/eere/ito/techno-economic-heuristic-tool-early-stage-technologies-techtest-tool",
+            "Messer PSA nitrogen (0.3–0.6 kWh/Nm³ mention): https://applications.messergroup.com/psa",
+            "Messer VPSA oxygen (low pressure example): https://applications.messergroup.com/oxygen_generator/vpsa",
+            "PATH/CHAI oxygen brief: https://media.path.org/documents/O2_generation_and_storage_PSA_VSA_v1.pdf",
+        ]),
+        language="text",
+    )
+
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 st.markdown("### Export")
 export_df = pd.DataFrame([
     {
@@ -1004,7 +1241,10 @@ export_df = pd.DataFrame([
         "TRL": int(plat["trl"]),
     },
 ])
+<<<<<<< HEAD
 
+=======
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
 st.download_button(
     "Download results.csv",
     data=export_df.to_csv(index=False).encode("utf-8"),
@@ -1012,4 +1252,8 @@ st.download_button(
     mime="text/csv",
 )
 
+<<<<<<< HEAD
 st.markdown("</div>", unsafe_allow_html=True)
+=======
+st.markdown("</div>", unsafe_allow_html=True)
+>>>>>>> 1208e4f (Update app with SVG flow diagrams)
